@@ -32,6 +32,8 @@ Strophe.addConnectionPlugin('jingle', {
 	_remoteView: null,
 	_remoteStream: null,
 	_receiver: false, // indicates if client is receiver or sender
+	_sid: "",
+	_to: "",
 
 	init: function(conn) {
 		this._connection = conn;
@@ -68,7 +70,6 @@ Strophe.addConnectionPlugin('jingle', {
 
 	setLocalView: function(el) {
 		this._localView = el;
-		this._getUserMedia();
 	},
 
 	setRemoteView: function(el) {
@@ -91,19 +92,24 @@ Strophe.addConnectionPlugin('jingle', {
 			console.log(e);
 			self._remoteView.attr('src', '');
 		}
+		this._peerConnection.onconnecting = function(e) {
+			console.log("ONCONNECT");
+			console.dir(e);
+		}
 		this._peerConnection.addStream(this._localStream);
 	},
 
-	_getUserMedia: function() {
-		navigator.getUserMedia("video,audio", this._gotStream.bind(this), this._gotStreamFailed.bind(this));
+	_getUserMedia: function(cb) {
+		navigator.getUserMedia("video,audio", this._gotStream.bind(this, cb), this._gotStreamFailed.bind(this));
 	},
 
-	_gotStream: function(s) {
+	_gotStream: function(cb, s) {
 		console.log("GOTSTREAM");
 		console.log(s);
 		var url = URL.createObjectURL(s);
 		this._localView.attr('src', url);
 		this._localStream = s;
+		cb();
 	},
 
 	_gotStreamFailed: function(error) {
@@ -125,55 +131,75 @@ Strophe.addConnectionPlugin('jingle', {
 		this._status = this.STATUS.BUSY;
 		this._to = to;
 		this._sid = Math.random().toString(36).substr(10,20);
-		this._createPeerConnection(function(msg) {
-			if (msg.indexOf('OK') !== -1) {
-				var iq = $iq({'from': self._connection.jid, 'to': self._to, 'type': 'set'});
+
+		this._getUserMedia(function() {
+			self._createPeerConnection(function(msg) {
+				console.log(msg);
+				if (msg.indexOf('OK') !== -1) {
+					var iq = $iq({'from': self._connection.jid, 'to': self._to, 'type': 'set'});
+					iq.c('jingle', {
+						xmlns: Strophe.NS.JINGLE,
+						action: 'session-info',
+						initiator: self._connection.jid,
+						sid: self._sid
+					});
+					iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_RTP});
+					iq.t(msg);
+					self._connection.sendIQ(iq);
+					return;
+				}
+				if (self._sdpMessage !== "") {
+					return;
+				}
+				self._sdpMessage = msg;
+
+				var iq = $iq({'from': self._connection.jid, 'to': to, 'type': 'set'});
 				iq.c('jingle', {
-					xmlns: Strophe.NS.JINGLE,
-					action: 'session-info',
-					initiator: self._connection.jid,
-					sid: self._sid
+					'xmlns': Strophe.NS.JINGLE, 
+					'action': 'session-initiate', 
+					'initiator': self._connection.jid, 
+					'responder' : to, 
+					'sid': self._sid
 				});
-				iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_RTP});
-				iq.t(msg);
-				self._connection.sendIQ(iq);
-			}
-			if (self._sdpMessage !== "") {
-				return;
-			}
-			self._sdpMessage = msg;
+				var jingle = SDPToJingle.createJingleStanza(msg);
 
-			var iq = $iq({'from': self._connection.jid, 'to': to, 'type': 'set'});
-			iq.c('jingle', {
-				'xmlns': Strophe.NS.JINGLE, 
-				'action': 'session-initiate', 
-				'initiator': self._connection.jid, 
-				'responder' : to, 
-				'sid': self._sid
+				iq.node.appendChild(self._xmlHtmlNode(jingle.audio).documentElement);
+				iq.node.appendChild(self._xmlHtmlNode(jingle.video).documentElement);
+				
+				var sdpJson = self._getJSONFromSdp(msg);
+				iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_TRANSPORTS_WEBRTC})
+				.c('session-info', {
+					'type': sdpJson.messageType,
+					'id': sdpJson.offererSessionId,
+					'seq': sdpJson.seq,
+					'tiebreaker': sdpJson.tieBreaker
+				});
+
+				self._connection.sendIQ(iq, cb);
 			});
-			iq.c('content', {'creator': self._connection.jid, 'name': name, 'senders': 'both'});
-
-			iq.c('transport', {xmlns: Strophe.NS.JINGLE_TRANSPORTS_WEBRTC});
-
-			var id = self._connection.sendIQ(iq, cb);
-			self._connection.addHandler(self._handleSessionInitAccept.bind(self), null, 'iq', 'result', id);
 		});
 	},
-
-	_handleSessionInitAccept: function(stanza) {
-		var iq = $iq({'from': this._connection.jid, 'to': stanza.getAttribute('from'), 'type': 'set'});
-		iq.c('jingle', {
-			xmlns: Strophe.NS.JINGLE,
-			action: 'session-info',
-			initiator: this._connection.jid,
-			sid: this._sdpData.offererSessionId
-		});
-		iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_RTP});
-		iq.t(this._sdpMessage);
-
-		this._connection.sendIQ(iq);
-
-		return false;
+	
+	_getJSONFromSdp: function(msg) {
+		return JSON.parse(msg.substring(4));
+	},
+	
+	/**
+	 * From Strophe.js
+	 *
+	 * License: MIT
+	 * Copyright 2006-2008, OGG, LLC
+	 */
+	_xmlHtmlNode: function (html) {
+		if (window.DOMParser) {
+			parser = new DOMParser();
+			node = parser.parseFromString(html, "text/xml");
+		} else {
+			node = new ActiveXObject("Microsoft.XMLDOM");
+			node.async="false";
+			node.loadXML(html);
+		}
+		return node;
 	},
 
 /* --Has to be done by the implementor--
@@ -200,63 +226,47 @@ Strophe.addConnectionPlugin('jingle', {
 	 */
 	handleSessionInit: function(stanza, cb) {
 		var self = this;
+		this._getUserMedia(function() {
+			var $stanza = $(stanza),
+				jingle = $stanza.children('jingle')[0],
+				sdp = SDPToJingle.parseJingleStanza(Strophe.serialize(jingle)),
+				iq = $iq({
+					'from': self._connection.jid, 
+					'to': $stanza.attr('from'),
+					'id': $stanza.attr('id'),
+					'type': 'result'
+				});
 
-		// send ack
-		this._connection.send($iq({
-			'from': this._connection.jid, 
-			'to': stanza.getAttribute('from'),
-			'id': stanza.getAttribute('id'),
-			'type': 'result'
-		}));
-		this._connection.addHandler(this._handleSessionInfo, Strophe.NS.JINGLE, 'iq', 'set');
+			self._sid = jingle.getAttribute('sid');
 
-		return true;
+			// send ack
+			self._connection.send(iq);
+			
+			if (!self._peerConnection) {
+				self._receiver = true;
+				self._createPeerConnection(function(msg) {
+					console.log(msg);
+				});	
+			}
+			
+			var info = $($(jingle).children('webrtc').children('session-info')[0]);
+			
+			sdp = "SDP\r\n{\r\n   \"messageType\" : \"" + info.attr('type') + "\",\r\n"
+				+ "   \"offererSessionId\" : \"" + info.attr('id') + "\",\r\n   \"sdp\" : \"" + sdp + "\",\r\n"
+				+ "   \"seq\" : " + info.attr('seq') + ",\r\n   \"tieBreaker\" : " + info.attr('tiebreaker') + "\r\n}";
+			console.log("MYSDP");
+			console.log(sdp);
+			setTimeout(function() {
+				console.log(self._peerConnection);
+				self._peerConnection.processSignalingMessage(sdp);
+			},5000);
+						
+			//self._connection.addHandler(self.handleSessionInfo, Strophe.NS.JINGLE, 'iq', 'set');
+
+			return true;
+		});
 	},
-
-	handleSessionInfo: function(stanza) {
-		var self = this,
-			$stanza = $(stanza),
-			$jingle = $stanza.children('jingle'),
-			iq = $iq({'from': this._connection.jid, 'to': stanza.getAttribute('from'), 'type': 'set'});
-		if (!this._peerConnection) {
-			console.log("SESSION INFO");
-			this._receiver = true;
-			this._createPeerConnection(function(msg) {
-				console.log(msg);
-				if (msg.indexOf('answererSessionId') !== -1) {
-					self._sdpMessage = msg;
-					iq.c('jingle', {
-						xmlns: Strophe.NS.JINGLE,
-						action: 'session-info',
-						initiator: $jingle.attr('initiator'),
-						sid: $jingle.attr('sid')
-					});
-					iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_RTP});
-					iq.t(self._sdpMessage);
-					console.log("MYMSG: ", msg);
-					self._connection.sendIQ(iq);
-				}
-			});
-
-			this._peerConnection.processSignalingMessage($stanza.find('webrtc').text());
-
-		} else {
-			console.log("PARSING FOOBAR");
-			this._peerConnection.processSignalingMessage($stanza.find('webrtc').text());
-			iq.c('jingle', {
-				xmlns: Strophe.NS.JINGLE,
-				action: 'session-accept',
-				initiator: $jingle.attr('initiator'),
-				sid: $jingle.attr('sid')
-			});
-			iq.c('content', {'creator': $jingle.attr('initiator')});
-			iq.c('transport', {xmlns: Strophe.NS.JINGLE_TRANSPORTS_WEBRTC});
-			this._connection.sendIQ(iq);
-		}
-
-		return true;
-	},
-
+	
 	/** Function: handleSessionAccept
 	 * After responder sends session-accept, send acknowledge session acceptance
 	 * and attempt to establish connectivity using the data channel.
