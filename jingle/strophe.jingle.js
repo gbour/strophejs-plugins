@@ -80,21 +80,31 @@ Strophe.addConnectionPlugin('jingle', {
 		var self = this;
 		this._peerConnection = new PeerConnection(this._serverConfig, sdpMessageCallback);
 		this._peerConnection.onaddstream = function(e) {
-			console.log("ADDSTREAM");
-			console.log(e);
+			console.info("onaddstream");
 			var stream = e.stream,
 				url = URL.createObjectURL(stream);
 			self._remoteView.attr('src', url);
 			self._remoteStream = stream;
 		}
 		this._peerConnection.onremovestream = function(e) {
-			console.log("REMOVESTREAM");
-			console.log(e);
+			console.info("removestream");
 			self._remoteView.attr('src', '');
 		}
+		this._peerConnection.onmessage = function(e) {
+			console.info("onmessage");
+			console.log(e);
+		}
+		this._peerConnection.onopen = function(e) {
+			console.info("onopen");
+			console.log(e);
+		}
 		this._peerConnection.onconnecting = function(e) {
-			console.log("ONCONNECT");
+			console.info("ONCONNECT");
 			console.dir(e);
+		}
+		this._peerConnection.onstatechange = function(e, state) {
+			console.info("ONSTATECHANGE");
+			console.dir(e ,state);
 		}
 		this._peerConnection.addStream(this._localStream);
 	},
@@ -104,12 +114,12 @@ Strophe.addConnectionPlugin('jingle', {
 	},
 
 	_gotStream: function(cb, s) {
-		console.log("GOTSTREAM");
-		console.log(s);
 		var url = URL.createObjectURL(s);
 		this._localView.attr('src', url);
 		this._localStream = s;
-		cb();
+		if (cb) {
+			cb();	
+		}
 	},
 
 	_gotStreamFailed: function(error) {
@@ -136,15 +146,20 @@ Strophe.addConnectionPlugin('jingle', {
 			self._createPeerConnection(function(msg) {
 				console.log(msg);
 				if (msg.indexOf('OK') !== -1) {
-					var iq = $iq({'from': self._connection.jid, 'to': self._to, 'type': 'set'});
+					var iq = $iq({
+						'from': self._connection.jid,
+						'to': self._to,
+						'type': 'set'
+					});
 					iq.c('jingle', {
 						xmlns: Strophe.NS.JINGLE,
-						action: 'session-info',
+						action: 'session-accept',
 						initiator: self._connection.jid,
 						sid: self._sid
 					});
-					iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_RTP});
-					iq.t(msg);
+					
+					self._sdpToJingle(iq, msg, false);
+					
 					self._connection.sendIQ(iq);
 					return;
 				}
@@ -158,23 +173,10 @@ Strophe.addConnectionPlugin('jingle', {
 					'xmlns': Strophe.NS.JINGLE, 
 					'action': 'session-initiate', 
 					'initiator': self._connection.jid, 
-					'responder' : to, 
+					'responder' : to, 
 					'sid': self._sid
 				});
-				var jingle = SDPToJingle.createJingleStanza(msg);
-
-				iq.node.appendChild(self._xmlHtmlNode(jingle.audio).documentElement);
-				iq.node.appendChild(self._xmlHtmlNode(jingle.video).documentElement);
-				
-				var sdpJson = self._getJSONFromSdp(msg);
-				iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_TRANSPORTS_WEBRTC})
-				.c('session-info', {
-					'type': sdpJson.messageType,
-					'id': sdpJson.offererSessionId,
-					'seq': sdpJson.seq,
-					'tiebreaker': sdpJson.tieBreaker
-				});
-
+				self._sdpToJingle(iq, msg);
 				self._connection.sendIQ(iq, cb);
 			});
 		});
@@ -206,9 +208,10 @@ Strophe.addConnectionPlugin('jingle', {
 	_delegateJingleIq: function(stanza) {
 		var action = stanza.children.item('jingle').getAttribute('action');
 		if (action === 'session-initiate') {
-			return this._handleSessionInit(stanza);
-		} else if (action === 'session-accept') {
-			return this._handleSessionAccept(stanza);
+			// check if user want's to etc.
+			return this.handleSessionInit(stanza);
+		} else {
+			return this.handle(stanza);
 		}
 	},
 */
@@ -226,10 +229,10 @@ Strophe.addConnectionPlugin('jingle', {
 	 */
 	handleSessionInit: function(stanza, cb) {
 		var self = this;
+		
 		this._getUserMedia(function() {
 			var $stanza = $(stanza),
 				jingle = $stanza.children('jingle')[0],
-				sdp = SDPToJingle.parseJingleStanza(Strophe.serialize(jingle)),
 				iq = $iq({
 					'from': self._connection.jid, 
 					'to': $stanza.attr('from'),
@@ -239,52 +242,103 @@ Strophe.addConnectionPlugin('jingle', {
 
 			self._sid = jingle.getAttribute('sid');
 
-			// send ack
+			// send ack
 			self._connection.send(iq);
 			
 			if (!self._peerConnection) {
 				self._receiver = true;
 				self._createPeerConnection(function(msg) {
-					console.log(msg);
+					if (msg.indexOf('ANSWER') !== -1) {
+						var iq = $iq({
+							'from': self._connection.jid, 
+							'to': $stanza.attr('from'),
+							'type': 'set'
+						});
+						iq.c('jingle', {
+							'xmlns': Strophe.NS.JINGLE, 
+							'action': 'session-info', 
+							'initiator': $stanza.attr('from'), 
+							'responder' : self._connection.jid, 
+							'sid': self._sid
+						});
+						self._sdpToJingle(iq, msg);
+						self._connection.send(iq);
+					}
 				});	
 			}
-			
-			var info = $($(jingle).children('webrtc').children('session-info')[0]);
-			
-			sdp = "SDP\r\n{\r\n   \"messageType\" : \"" + info.attr('type') + "\",\r\n"
-				+ "   \"offererSessionId\" : \"" + info.attr('id') + "\",\r\n   \"sdp\" : \"" + sdp + "\",\r\n"
-				+ "   \"seq\" : " + info.attr('seq') + ",\r\n   \"tieBreaker\" : " + info.attr('tiebreaker') + "\r\n}";
-			console.log("MYSDP");
-			console.log(sdp);
-			setTimeout(function() {
-				console.log(self._peerConnection);
-				self._peerConnection.processSignalingMessage(sdp);
-			},5000);
-						
-			//self._connection.addHandler(self.handleSessionInfo, Strophe.NS.JINGLE, 'iq', 'set');
+			self._peerConnection.processSignalingMessage(self._jingleToSdp(stanza));
 
 			return true;
 		});
 	},
 	
-	/** Function: handleSessionAccept
-	 * After responder sends session-accept, send acknowledge session acceptance
-	 * and attempt to establish connectivity using the data channel.
-	 *
-	 * Parameters:
-	 *   (XMLNode) stanza - Session accept message
-	 *   (Function) cb - Callback after session acceptance acknowledgement has been sent
-	 */
-	handleSessionAccept: function(stanza, cb) {
+	_generateSdpJsonFromSdp: function(sdp, info) {
+		var str = "SDP\n{\n";
+		if (info.attr('answererid')) {
+			str += "   \"answererSessionId\" : \"" + info.attr('answererid') + "\",\n";
+		}
+		str += "   \"messageType\" : \"" + info.attr('type') + "\",\n";
+		if (info.attr('offererid')) {
+			str += "   \"offererSessionId\" : \"" + info.attr('offererid') + "\",\n";
+		}
+		if (sdp) {
+			str += "   \"sdp\" : \"" + sdp + "\",\n";
+		}
+		str += "   \"seq\" : " + parseInt(info.attr('seq'), 10);
+		if (info.attr('tiebreaker')) {
+		 	str += ",\n   \"tieBreaker\" : " + parseInt(info.attr('tiebreaker'), 10);
+		}
+		return str + "\n}";
+	},
+	
+	_jingleToSdp: function(stanza) {
+		$stanza = $(stanza),
+		jingle = $stanza.children('jingle')[0],
+		sdp = SDPToJingle.parseJingleStanza(Strophe.serialize(jingle)),
+		$info = $($(jingle).children('webrtc').children('session-info')[0]);
+		
+	 	return this._generateSdpJsonFromSdp(sdp, $info);
+	},
+	
+	_sdpToJingle: function(iq, msg, dontAppendJingleMedia) {
+		if (dontAppendJingleMedia !== false) {
+			var jingle = SDPToJingle.createJingleStanza(msg);
+
+			iq.node.appendChild(this._xmlHtmlNode(jingle.audio).documentElement);
+			iq.node.appendChild(this._xmlHtmlNode(jingle.video).documentElement);
+		}
+
+		var sdpJson = this._getJSONFromSdp(msg);
+		iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_TRANSPORTS_WEBRTC});
+		
+		var sinfo = {
+			'type': sdpJson.messageType,
+			'seq': sdpJson.seq
+		};
+		if (sdpJson.offererSessionId) {
+			sinfo['offererid'] = sdpJson.offererSessionId;
+		}
+		if (sdpJson.answererSessionId) {
+			sinfo['answererid'] = sdpJson.answererSessionId;
+		}
+		if (sdpJson.tieBreaker) {
+			sinfo['tiebreaker'] = sdpJson.tieBreaker;
+		}
+		iq.c('session-info', sinfo);
+	},
+	
+	handle: function(stanza) {
 		var iq = $iq({
 			'from': this._connection.jid,
 			'id': stanza.getAttribute('id'),
 			'to': stanza.getAttribute('from'),
 			'type': 'result'
 		});
-		this._connection.sendIQ(iq, cb);
+		
+		this._peerConnection.processSignalingMessage(this._jingleToSdp(stanza));
+		
+		this._connection.sendIQ(iq);
 
 		return true;
-	},
-
+	}
  });
