@@ -32,7 +32,8 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_remoteStream = null,
 		_receiver = false, // indicates if client is receiver or sender
 		_sid = "",
-		_to = "",
+		_initiator = "",
+		_response = "",
 		_successCallback = null,
 
 		_createPeerConnection = function(sdpMessageCallback) {
@@ -202,36 +203,40 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_remoteView = el;
 	};
 
+	self.isBusy = function() {
+		return _status === STATUS.BUSY;
+	};
 
 
 	/** Function: initSession
 	 * Sends a session-initialize request to the specified recipient.
 	 *
 	 * Parameters:
-	 *   (String) to - Recipient's jid
+	 *   (String) responder - Recipient's jid
 	 *   (String) name - Name of the iq request
 	 *   (String) media - Media type (audio/video)
 	 *   (Function) cb - Callback after successful video establishing
 	 */
-	self.initSession = function(to, name, media, cb) {
+	self.initSession = function(responder, name, media, cb) {
 		var self = this;
-		_status = this.STATUS.BUSY;
-		_to = to;
+		_status = STATUS.BUSY;
+		_responder = responder;
+		_initiator = _connection.jid;
 		_successCallback = cb;
 		_sid = Math.random().toString(36).substr(10,20);
 
 		_getUserMedia(function() {
+			console.log('foobar');
 			_createPeerConnection(function(msg) {
-				if (msg.indexOf('OK') !== -1) {
-					var iq = $iq({
-						'from': _connection.jid,
-						'to': _to,
-						'type': 'set'
-					});
+				console.log(msg);
+				var iq = $iq({'from': _initiator, 'to': responder, 'type': 'set'}),
+					jsonSdp = _getJSONFromSdp(msg);
+				if (jsonSdp.messageType === 'OK') {
 					iq.c('jingle', {
 						xmlns: Strophe.NS.JINGLE,
 						action: 'session-accept',
-						initiator: _connection.jid,
+						initiator: _initiator,
+						responder: _responder,
 						sid: _sid
 					});
 
@@ -247,12 +252,11 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 				}
 				_sdpMessage = msg;
 
-				var iq = $iq({'from': _connection.jid, 'to': to, 'type': 'set'});
 				iq.c('jingle', {
 					'xmlns': Strophe.NS.JINGLE,
 					'action': 'session-initiate',
-					'initiator': _connection.jid,
-					'responder' : to,
+					'initiator': _initiator,
+					'responder': _responder,
 					'sid': _sid
 				});
 				_sdpToJingle(iq, msg);
@@ -274,7 +278,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	 */
 	self.handleSessionInit = function(stanza, cb) {
 		var self = this;
-		_status = this.STATUS.BUSY;
+		_status = STATUS.BUSY;
 		_getUserMedia(function() {
 			var $stanza = $(stanza),
 				jingle = $stanza.children('jingle')[0],
@@ -285,15 +289,19 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 					'type': 'result'
 				});
 
+			_initiator = $stanza.attr('from');
+			_receiver = true;
+			_responder = $stanza.attr('to');
 			_sid = jingle.getAttribute('sid');
 
 			// send ack
-			_connection.send(iq);
+			_connection.sendIQ(iq);
 
 			if (!_peerConnection) {
-				_receiver = true;
 				_createPeerConnection(function(msg) {
-					if (msg.indexOf('ANSWER') !== -1) {
+					console.log(msg);
+					var jsonSdp = _getJSONFromSdp(msg);
+					if (jsonSdp.messageType === 'ANSWER') {
 						var iq = $iq({
 							'from': _connection.jid,
 							'to': $stanza.attr('from'),
@@ -302,12 +310,12 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 						iq.c('jingle', {
 							'xmlns': Strophe.NS.JINGLE,
 							'action': 'session-info',
-							'initiator': $stanza.attr('from'),
-							'responder' : _connection.jid,
+							'initiator': _initiator,
+							'responder' : _responder,
 							'sid': _sid
 						});
 						_sdpToJingle(iq, msg);
-						_connection.send(iq);
+						_connection.sendIQ(iq);
 					}
 				});
 			}
@@ -328,9 +336,36 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_peerConnection.processSignalingMessage(_jingleToSdp(stanza));
 
 		_connection.sendIQ(iq);
+		
+		if ($(stanza).children('jingle').attr('action') === 'session-terminate') {
+			self.terminate();
+		}
 
 		return true;
 	};
+
+	self.terminate = function() {
+		_status = null;
+		_peerConnection.close();
+		console.log(_peerConnection);
+		_peerConnection = null;
+		
+		var iq = $iq({
+			'from': _connection.jid,
+			'to': _receiver ? _initiator : _responder,
+			'type': 'set'
+		});
+		iq.c('jingle', {
+			'xmlns': Strophe.NS.JINGLE,
+			'action': 'session-terminate',
+			'initiator': _initiator,
+			'responder': _responder,
+			'sid': _sid
+		})
+		.c('reason').c('success');
+		
+		_connection.sendIQ(iq);
+	}
 
 	return self;
  })({}));
