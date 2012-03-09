@@ -34,6 +34,7 @@ Strophe.addConnectionPlugin('jingle', {
 	_receiver: false, // indicates if client is receiver or sender
 	_sid: "",
 	_to: "",
+	_successCallback: null,
 
 	init: function(conn) {
 		this._connection = conn;
@@ -134,17 +135,17 @@ Strophe.addConnectionPlugin('jingle', {
 	 *   (String) to - Recipient's jid
 	 *   (String) name - Name of the iq request
 	 *   (String) media - Media type (audio/video)
-	 *   (Function) cb - Callback after IQ has been sent
+	 *   (Function) cb - Callback after successful video establishing
 	 */
 	initSession: function(to, name, media, cb) {
 		var self = this;
 		this._status = this.STATUS.BUSY;
 		this._to = to;
+		this._successCallback = cb;
 		this._sid = Math.random().toString(36).substr(10,20);
 
 		this._getUserMedia(function() {
 			self._createPeerConnection(function(msg) {
-				console.log(msg);
 				if (msg.indexOf('OK') !== -1) {
 					var iq = $iq({
 						'from': self._connection.jid,
@@ -161,6 +162,8 @@ Strophe.addConnectionPlugin('jingle', {
 					self._sdpToJingle(iq, msg, false);
 					
 					self._connection.sendIQ(iq);
+					
+					self._successCallback();
 					return;
 				}
 				if (self._sdpMessage !== "") {
@@ -177,7 +180,7 @@ Strophe.addConnectionPlugin('jingle', {
 					'sid': self._sid
 				});
 				self._sdpToJingle(iq, msg);
-				self._connection.sendIQ(iq, cb);
+				self._connection.sendIQ(iq);
 			});
 		});
 	},
