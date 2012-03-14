@@ -10,8 +10,8 @@
  *   - Michael Weibel <michael.weibel@gmail.com>
  */
 
-if (window.webkitPeerConnection) {
-	window.PeerConnection = window.webkitPeerConnection;
+if (window.webkitPeerConnection || window.webkitDeprecatedPeerConnection) {
+	window.PeerConnection = window.webkitPeerConnection || window.webkitDeprecatedPeerConnection;
 	window.URL = window.webkitURL;
 	navigator.getUserMedia = navigator.webkitGetUserMedia;
 }
