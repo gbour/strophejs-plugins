@@ -206,7 +206,34 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	self.isBusy = function() {
 		return _status === STATUS.BUSY;
 	};
-
+	
+	/** Function: escapeJid
+	 * Escapes a jid (node & resource get escaped)
+	 *
+	 * See:
+	 *   XEP-0106
+	 *
+	 * Author: Candy by Patrick Stadler & Michael Weibel
+	 *         http://candy-chat.github.com/candy
+	 *
+	 * Parameters:
+	 *   (String) jid - Jid
+	 *
+	 * Returns:
+	 *   (String) - escaped jid
+	 */
+	self.escapeJid = function(jid) {
+		var node = Strophe.escapeNode(Strophe.getNodeFromJid(jid)),
+			domain = Strophe.getDomainFromJid(jid),
+			resource = Strophe.getResourceFromJid(jid);
+			
+		jid = node + '@' + domain;
+		if (resource) {
+			jid += '/' + Strophe.escapeNode(resource);
+		}
+		
+		return jid;
+	};
 
 	/** Function: initSession
 	 * Sends a session-initialize request to the specified recipient.
@@ -220,16 +247,14 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	self.initSession = function(responder, name, media, cb) {
 		var self = this;
 		_status = STATUS.BUSY;
-		_responder = responder;
-		_initiator = _connection.jid;
+		_responder = self.escapeJid(responder);
+		_initiator = self.escapeJid(_connection.jid);
 		_successCallback = cb;
 		_sid = Math.random().toString(36).substr(10,20);
-
+	
 		_getUserMedia(function() {
-			console.log('foobar');
 			_createPeerConnection(function(msg) {
-				console.log(msg);
-				var iq = $iq({'from': _initiator, 'to': responder, 'type': 'set'}),
+				var iq = $iq({'from': _initiator, 'to': _responder, 'type': 'set'}),
 					jsonSdp = _getJSONFromSdp(msg);
 				if (jsonSdp.messageType === 'OK') {
 					iq.c('jingle', {
@@ -299,7 +324,6 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 
 			if (!_peerConnection) {
 				_createPeerConnection(function(msg) {
-					console.log(msg);
 					var jsonSdp = _getJSONFromSdp(msg);
 					if (jsonSdp.messageType === 'ANSWER') {
 						var iq = $iq({
@@ -346,8 +370,10 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 
 	self.terminate = function() {
 		_status = null;
+		_peerConnection.removeStream(_localStream);
+		_peerConnection.removeStream(_remoteStream);
+		_peerConnection.remoteStreams[0] = null;
 		_peerConnection.close();
-		console.log(_peerConnection);
 		_peerConnection = null;
 		
 		var iq = $iq({
