@@ -180,23 +180,25 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 
 	self.init = function(conn) {
 		_connection = conn;
-
-		Strophe.addNamespace('JINGLE', 'urn:xmpp:jingle:1');
-		Strophe.addNamespace('JINGLE_ERRORS', 'urn:xmpp:jingle:errors:1');
-		Strophe.addNamespace('JINGLE_RTP', 'urn:xmpp:jingle:apps:rtp:1');
-		Strophe.addNamespace('JINGLE_RTP_ERRORS', 'urn:xmpp:jingle:apps:rtp:errors:1');
-		Strophe.addNamespace('JINGLE_RTP_INFO', 'urn:xmpp:jingle:apps:rtp:info:1');
-		Strophe.addNamespace('JINGLE_RTP_AUDIO', 'urn:xmpp:jingle:apps:rtp:audio');
-		Strophe.addNamespace('JINGLE_RTP_VIDEO', 'urn:xmpp:jingle:apps:rtp:video');
-		Strophe.addNamespace('JINGLE_TRANSPORTS_ICE_UDP', 'urn:xmpp:jingle:transports:ice-udp:1');
-		Strophe.addNamespace('JINGLE_TRANSPORTS_RAW_UDP', 'urn:xmpp:jingle:transports:raw-udp:1');
-		Strophe.addNamespace('JINGLE_TRANSPORTS_WEBRTC', 'urn:xmpp:jingle:transports:webrtc:1');
-
-		_connection.disco.addFeature(Strophe.NS.JINGLE);
-		_connection.disco.addFeature(Strophe.NS.JINGLE_TRANSPORTS_WEBRTC);
-		_connection.disco.addFeature(Strophe.NS.JINGLE_RTP);
-		_connection.disco.addFeature(Strophe.NS.JINGLE_RTP_AUDIO);
-		_connection.disco.addFeature(Strophe.NS.JINGLE_RTP_VIDEO);
+		
+			Strophe.addNamespace('JINGLE', 'urn:xmpp:jingle:1');
+			Strophe.addNamespace('JINGLE_ERRORS', 'urn:xmpp:jingle:errors:1');
+			Strophe.addNamespace('JINGLE_RTP', 'urn:xmpp:jingle:apps:rtp:1');
+			Strophe.addNamespace('JINGLE_RTP_ERRORS', 'urn:xmpp:jingle:apps:rtp:errors:1');
+			Strophe.addNamespace('JINGLE_RTP_INFO', 'urn:xmpp:jingle:apps:rtp:info:1');
+			Strophe.addNamespace('JINGLE_RTP_AUDIO', 'urn:xmpp:jingle:apps:rtp:audio');
+			Strophe.addNamespace('JINGLE_RTP_VIDEO', 'urn:xmpp:jingle:apps:rtp:video');
+			Strophe.addNamespace('JINGLE_TRANSPORTS_ICE_UDP', 'urn:xmpp:jingle:transports:ice-udp:1');
+			Strophe.addNamespace('JINGLE_TRANSPORTS_RAW_UDP', 'urn:xmpp:jingle:transports:raw-udp:1');
+			Strophe.addNamespace('JINGLE_TRANSPORTS_WEBRTC', 'urn:xmpp:jingle:transports:webrtc:1');
+			
+		if (navigator.getUserMedia && window.PeerConnection) {
+			_connection.disco.addFeature(Strophe.NS.JINGLE);
+			_connection.disco.addFeature(Strophe.NS.JINGLE_TRANSPORTS_WEBRTC);
+			_connection.disco.addFeature(Strophe.NS.JINGLE_RTP);
+			_connection.disco.addFeature(Strophe.NS.JINGLE_RTP_AUDIO);
+			_connection.disco.addFeature(Strophe.NS.JINGLE_RTP_VIDEO);
+		}
 	};
 
 	/** Function: setServer
@@ -269,7 +271,6 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_sid = Math.random().toString(36).substr(10,20);
 
 		if (!_recipientSupportsJingle(responder)) {
-			self.rejectSession(ERROR.NOT_SUPPORTED, _responder);
 			return false;
 		}
 
@@ -373,6 +374,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 
 			return true;
 		});
+		return true;
 	};
 
 	self.handle = function(stanza) {
