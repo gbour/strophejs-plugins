@@ -20,6 +20,10 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	var STATUS = {
 			BUSY: 1
 		},
+		ERROR = {
+			BUSY: 1,
+			NOT_SUPPORTED: 2
+		},
 		_connection = null,
 		_peerConnection = null,
 		_sdpData = {},
@@ -160,6 +164,18 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 				sinfo['tiebreaker'] = sdpJson.tieBreaker;
 			}
 			iq.c('session-info', sinfo);
+		},
+
+		_recipientSupportsJingle = function(jid) {
+			var supportedSpecs = _connection.caps.getCapabilitiesByJid(jid);
+			if(supportedSpecs) {
+				for(var i = 0, len = supportedSpecs.length; i < len; i++) {
+					if (supportedSpecs[i].attributes[0].value === Strophe.NS.JINGLE) {
+						return true;
+					}
+				}
+			}
+			return false;
 		};
 
 	self.init = function(conn) {
@@ -206,7 +222,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	self.isBusy = function() {
 		return _status === STATUS.BUSY;
 	};
-	
+
 	/** Function: escapeJid
 	 * Escapes a jid (node & resource get escaped)
 	 *
@@ -226,12 +242,12 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		var node = Strophe.escapeNode(Strophe.getNodeFromJid(jid)),
 			domain = Strophe.getDomainFromJid(jid),
 			resource = Strophe.getResourceFromJid(jid);
-			
+
 		jid = node + '@' + domain;
 		if (resource) {
 			jid += '/' + Strophe.escapeNode(resource);
 		}
-		
+
 		return jid;
 	};
 
@@ -251,7 +267,12 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_initiator = self.escapeJid(_connection.jid);
 		_successCallback = cb;
 		_sid = Math.random().toString(36).substr(10,20);
-	
+
+		if (!_recipientSupportsJingle(responder)) {
+			self.rejectSession(ERROR.NOT_SUPPORTED, _responder);
+			return false;
+		}
+
 		_getUserMedia(function() {
 			_createPeerConnection(function(msg) {
 				var iq = $iq({'from': _initiator, 'to': _responder, 'type': 'set'}),
@@ -302,19 +323,24 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	 *   (Boolean) - true
 	 */
 	self.handleSessionInit = function(stanza, cb) {
-		var self = this;
+		var self = this,
+			$stanza = $(stanza),
+			from = $stanza.attr('from');
+		if (self.isBusy()) {
+			self.rejectSession(ERROR.BUSY, form);
+			return false;
+		}
 		_status = STATUS.BUSY;
 		_getUserMedia(function() {
-			var $stanza = $(stanza),
-				jingle = $stanza.children('jingle')[0],
+			var jingle = $stanza.children('jingle')[0],
 				iq = $iq({
 					'from': _connection.jid,
-					'to': $stanza.attr('from'),
+					'to': from,
 					'id': $stanza.attr('id'),
 					'type': 'result'
 				});
 
-			_initiator = $stanza.attr('from');
+			_initiator = from;
 			_receiver = true;
 			_responder = $stanza.attr('to');
 			_sid = jingle.getAttribute('sid');
@@ -360,12 +386,36 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_peerConnection.processSignalingMessage(_jingleToSdp(stanza));
 
 		_connection.sendIQ(iq);
-		
+
 		if ($(stanza).children('jingle').attr('action') === 'session-terminate') {
 			self.terminate();
 		}
 
 		return true;
+	};
+
+	self.rejectSession = function(reasonType, to) {
+		var iq = $iq({
+				'from': _connection.jid,
+				'to': to,
+				'type': 'error'
+			}),
+			errorType, reason;
+
+		switch(reasonType) {
+			case ERROR.BUSY:
+				errorType = 'wait';
+				reason = 'resource-constraint';
+				break;
+			case ERROR.NOT_SUPPORTED:
+				errorType = 'cancel';
+				reason = 'service-unavailable';
+				break;
+		}
+
+		iq.c('error', {'type': errorType})
+			.c(reason, {'xmlns': Strophe.NS.STANZAS});
+		_connection.sendIQ(iq);
 	};
 
 	self.terminate = function() {
@@ -375,7 +425,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_peerConnection.remoteStreams[0] = null;
 		_peerConnection.close();
 		_peerConnection = null;
-		
+
 		var iq = $iq({
 			'from': _connection.jid,
 			'to': _receiver ? _initiator : _responder,
@@ -389,9 +439,9 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 			'sid': _sid
 		})
 		.c('reason').c('success');
-		
+
 		_connection.sendIQ(iq);
-	}
+	};
 
 	return self;
  })({}));
