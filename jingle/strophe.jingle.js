@@ -310,6 +310,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 				_connection.sendIQ(iq);
 			});
 		});
+		return true;
 	};
 
 	/** Function: handleSessionInit
