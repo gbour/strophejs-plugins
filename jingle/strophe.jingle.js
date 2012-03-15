@@ -180,7 +180,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 
 	self.init = function(conn) {
 		_connection = conn;
-		
+
 			Strophe.addNamespace('JINGLE', 'urn:xmpp:jingle:1');
 			Strophe.addNamespace('JINGLE_ERRORS', 'urn:xmpp:jingle:errors:1');
 			Strophe.addNamespace('JINGLE_RTP', 'urn:xmpp:jingle:apps:rtp:1');
@@ -191,7 +191,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 			Strophe.addNamespace('JINGLE_TRANSPORTS_ICE_UDP', 'urn:xmpp:jingle:transports:ice-udp:1');
 			Strophe.addNamespace('JINGLE_TRANSPORTS_RAW_UDP', 'urn:xmpp:jingle:transports:raw-udp:1');
 			Strophe.addNamespace('JINGLE_TRANSPORTS_WEBRTC', 'urn:xmpp:jingle:transports:webrtc:1');
-			
+
 		if (navigator.getUserMedia && window.PeerConnection) {
 			_connection.disco.addFeature(Strophe.NS.JINGLE);
 			_connection.disco.addFeature(Strophe.NS.JINGLE_TRANSPORTS_WEBRTC);
