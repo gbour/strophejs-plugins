@@ -10,8 +10,8 @@
  *   - Michael Weibel <michael.weibel@gmail.com>
  */
 
-if (window.webkitPeerConnection || window.webkitDeprecatedPeerConnection) {
-	window.PeerConnection = window.webkitPeerConnection || window.webkitDeprecatedPeerConnection;
+if (window.webkitPeerConnection || window.webkitDeprecatedPeerConnection) {
+	window.PeerConnection = window.webkitPeerConnection || window.webkitDeprecatedPeerConnection;
 	window.URL = window.webkitURL;
 	navigator.getUserMedia = navigator.webkitGetUserMedia;
 }
@@ -181,16 +181,16 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	self.init = function(conn) {
 		_connection = conn;
 
-			Strophe.addNamespace('JINGLE', 'urn:xmpp:jingle:1');
-			Strophe.addNamespace('JINGLE_ERRORS', 'urn:xmpp:jingle:errors:1');
-			Strophe.addNamespace('JINGLE_RTP', 'urn:xmpp:jingle:apps:rtp:1');
-			Strophe.addNamespace('JINGLE_RTP_ERRORS', 'urn:xmpp:jingle:apps:rtp:errors:1');
-			Strophe.addNamespace('JINGLE_RTP_INFO', 'urn:xmpp:jingle:apps:rtp:info:1');
-			Strophe.addNamespace('JINGLE_RTP_AUDIO', 'urn:xmpp:jingle:apps:rtp:audio');
-			Strophe.addNamespace('JINGLE_RTP_VIDEO', 'urn:xmpp:jingle:apps:rtp:video');
-			Strophe.addNamespace('JINGLE_TRANSPORTS_ICE_UDP', 'urn:xmpp:jingle:transports:ice-udp:1');
-			Strophe.addNamespace('JINGLE_TRANSPORTS_RAW_UDP', 'urn:xmpp:jingle:transports:raw-udp:1');
-			Strophe.addNamespace('JINGLE_TRANSPORTS_WEBRTC', 'urn:xmpp:jingle:transports:webrtc:1');
+		Strophe.addNamespace('JINGLE', 'urn:xmpp:jingle:1');
+		Strophe.addNamespace('JINGLE_ERRORS', 'urn:xmpp:jingle:errors:1');
+		Strophe.addNamespace('JINGLE_RTP', 'urn:xmpp:jingle:apps:rtp:1');
+		Strophe.addNamespace('JINGLE_RTP_ERRORS', 'urn:xmpp:jingle:apps:rtp:errors:1');
+		Strophe.addNamespace('JINGLE_RTP_INFO', 'urn:xmpp:jingle:apps:rtp:info:1');
+		Strophe.addNamespace('JINGLE_RTP_AUDIO', 'urn:xmpp:jingle:apps:rtp:audio');
+		Strophe.addNamespace('JINGLE_RTP_VIDEO', 'urn:xmpp:jingle:apps:rtp:video');
+		Strophe.addNamespace('JINGLE_TRANSPORTS_ICE_UDP', 'urn:xmpp:jingle:transports:ice-udp:1');
+		Strophe.addNamespace('JINGLE_TRANSPORTS_RAW_UDP', 'urn:xmpp:jingle:transports:raw-udp:1');
+		Strophe.addNamespace('JINGLE_TRANSPORTS_WEBRTC', 'urn:xmpp:jingle:transports:webrtc:1');
 
 		if (navigator.getUserMedia && window.PeerConnection) {
 			_connection.disco.addFeature(Strophe.NS.JINGLE);
@@ -258,8 +258,8 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	 *
 	 * Parameters:
 	 *   (String) responder - Recipient's jid
-	 *   (String) name - Name of the iq request
-	 *   (String) media - Media type (audio/video)
+	 *   (String) name - Name of the iq request
+	 *   (String) media - Media type (audio/video)
 	 *   (Function) cb - Callback after successful video establishing
 	 */
 	self.initSession = function(responder, name, media, cb) {
@@ -304,7 +304,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 					'action': 'session-initiate',
 					'initiator': _initiator,
 					'responder': _responder,
-					'sid': _sid
+					'sid': _sid
 				});
 				_sdpToJingle(iq, msg);
 				_connection.sendIQ(iq);
@@ -313,12 +313,12 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		return true;
 	};
 
-	/** Function: handleSessionInit
+	/** Function: handleSessionInit
 	 * Acts upon a session-initiate request and if everything's well,
 	 * replies with a session initiate accept result
 	 *
 	 * Parameters:
-	 *   (String) stanza - XMPP Stanza
+	 *   (String) stanza - XMPP Stanza
 	 *   (Function) cb - Callback after session-accept or session-terminate has been sent
 	 *
 	 * Returns:
@@ -447,4 +447,4 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	};
 
 	return self;
- })({}));
+})({}));
