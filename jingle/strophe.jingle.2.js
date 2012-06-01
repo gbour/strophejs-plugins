@@ -6,12 +6,14 @@
  * Authors:
  *   - Michael Weibel <michael.weibel@gmail.com>
  *
+ * Some implementation taken from webRTC examples by Harald Alvestrand, Copyright 2012 Google.
+ *
  * Copyright:
  *   - Michael Weibel <michael.weibel@gmail.com>
  */
 
-if (window.webkitPeerConnection || window.webkitDeprecatedPeerConnection) {
-	window.PeerConnection = window.webkitPeerConnection || window.webkitDeprecatedPeerConnection;
+if (window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection) {
+	window.PeerConnection = window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection;
 	window.URL = window.webkitURL;
 	navigator.getUserMedia = navigator.webkitGetUserMedia;
 }
@@ -21,11 +23,17 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_activeCalls = [],
 		_initiator,
 		STATUS = {
-			INITIALIZING: 1,
-			OFFER: 2,
-			ANSWER: 3,
-			OK: 4,
-			CLOSED: 5
+			NEW: "new",
+			PREPARING_OFFER: "preparing-offer",
+			OFFER_SENT: "offer-sent",
+			OFFER_RECEIVED: "offer-received",
+			OFFER: "offer",
+			ESTABLISHED: "established",
+			PREPARING_ANSWER: "preparing-answer",
+			ANSWER: "answer",
+			ANSWER_RECEIVED: "answer-received",
+			OK: "ok",
+			CLOSED: "closed"
 		},
 		
 		/** Function: _escapeJid
@@ -63,7 +71,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		},
 		
 		_getUserMedia = function(cb) {
-			navigator.getUserMedia("video,audio", _gotStream.bind(this, cb), _gotStreamFailed.bind(this));
+			navigator.getUserMedia({"video": true, "audio": true}, _gotStream.bind(this, cb), _gotStreamFailed.bind(this));
 		},
 		
 		_gotStream = function(cb, s) {
@@ -78,13 +86,6 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_gotStreamFailed = function(error) {
 			console.log("STREAMFAILED");
 			console.log(error);
-		},
-		
-		/** PrivateFunction: _getJSONFromSdp
-		 * Remove "SDP "-Prefix and parse the message as JSON.
-		 */
-		_getJSONFromSdp = function(msg) {
-			return JSON.parse(msg.substring(4));
 		},
 
 		/** PrivateFunction: _xmlHtmlNode
@@ -128,36 +129,19 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_jingleToSdp = function(stanza) {
 			var $stanza = $(stanza),
 				jingle = $stanza.children('jingle')[0],
-				sdp = SDPToJingle.parseJingleStanza(Strophe.serialize(jingle)),
-				$info = $($(jingle).children('webrtc').children('session-info')[0]);
+				sdp = SDPToJingle.parseJingleStanza(Strophe.serialize(jingle));
+				/*$info = $($(jingle).children('webrtc').children('session-info')[0]);*/
 
-		 	return _generateSdpJsonFromSdp(sdp, $info);
+		 	return sdp;
 		},
 		_sdpToJingle = function(iq, msg, dontAppendJingleMedia) {
 			if (dontAppendJingleMedia !== false) {
 				var jingle = SDPToJingle.createJingleStanza(msg);
 
+				iq.attrs({'sid': jingle.sid});
 				iq.node.appendChild(_xmlHtmlNode(jingle.audio).documentElement);
 				iq.node.appendChild(_xmlHtmlNode(jingle.video).documentElement);
 			}
-
-			var sdpJson = _getJSONFromSdp(msg),
-				sinfo = {
-					'type': sdpJson.messageType,
-					'seq': sdpJson.seq
-				};
-			iq.c('webrtc', {xmlns: Strophe.NS.JINGLE_TRANSPORTS_WEBRTC});
-
-			if (sdpJson.offererSessionId) {
-				sinfo['offererid'] = sdpJson.offererSessionId;
-			}
-			if (sdpJson.answererSessionId) {
-				sinfo['answererid'] = sdpJson.answererSessionId;
-			}
-			if (sdpJson.tieBreaker) {
-				sinfo['tiebreaker'] = sdpJson.tieBreaker;
-			}
-			iq.c('session-info', sinfo);
 		},
 		
 		_recipientSupportsJingle = function(jid) {
@@ -223,7 +207,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	};
 	
 	self.isBusy = function() {
-		return self.MAX_CONCURRENT_CALLS >== _activeCalls.length;
+		return self.MAX_CONCURRENT_CALLS <= _activeCalls.length;
 	}
 	
 	/** Constructor: JingleCall
@@ -231,8 +215,9 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 	 *
 	 * Parameters:
 	 *   (Element) remoteView - Remote video element
+	 *   (Function) cb - Callback when local user media has been established.
 	 */
-	self.JingleCall = function(remoteView) {
+	self.JingleCall = function(remoteView, cb) {
 		if (self.isBusy()) {
 			console.log(_activeCalls);
 			throw "Max Number of Calls reached";
@@ -240,15 +225,17 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 		_activeCalls.push(this);
 		
 		this._remoteView = remoteView;
+		
 		if(_activeCalls.length === 1) {
-			_getUserMedia();
+			_getUserMedia(cb);
+		} else {
+			cb();
 		}
 	};
 	
 	self.JingleCall.prototype = (function() {
 		return {
 			initSession: function(to, name, media, successCallback) {
-				this._callStatus = STATUS.INITIALIZING;
 				this._to = this._responder = _escapeJid(to);
 				this._from = this._initiator = _escapeJid(_connection.jid);
 				this._name = name;
@@ -256,11 +243,16 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 				this._successCallback = successCallback;
 				this._sid = Math.random().toString(36).substr(10, 30);
 
-				if (!_recipientSupportsJingle(_responder)) {
+				if (!_recipientSupportsJingle(this._responder)) {
 					return false;
 				}
 				
-				this._createPeerConnection(this._handleSdp.bind(this));
+				//this._createPeerConnection(this._handleSdp.bind(this));
+				this._createPeerConnection();
+				/*var offer = this._peerConnection.createOffer({"has_audio": true, "has_video": true});
+				this._peerConnection.setLocalDescription(this._peerConnection.SDP_OFFER, offer);
+				this._peerConnection.startIce();
+				this._handleSdp(offer.toSdp());*/
 				return true;
 			},
 			
@@ -274,20 +266,22 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 			 * Returns:
 			 *   (Boolean) - true if ok, false if not ok
 			 */
-			handleSessionInit: function(stanza, cb) {
+			handleSessionInit: function(stanza, successCallback) {
 				var $stanza = $(stanza),
 					from = $stanza.attr('from'),
 					id = $stanza.attr('id')
 					$jingle = $($stanza.children('jingle')[0]),
-					contents = $jingle.children('content');
-					
-				this._sendACK(from, id);
-				this._callStatus = STATUS.OFFER;
-				this._to = this._responder = _escapeJid(_connection.jid);
-				this._from = this._initiator = _escapeJid(from);
+					contents = $jingle.children('content'),
+					sdp = _jingleToSdp(stanza);
+
+				this._sendAck(from, id);
+				this._to = this._initiator = _escapeJid(from);
+				this._from = this._responder = _escapeJid(_connection.jid);
 				this._sid = $jingle.attr('sid');
+				this._successCallback = successCallback;
 				
-				this._createPeerConnection(this._handleSdp.bind(this));
+				this._createPeerConnection();
+				this._onSignalingMessage(sdp);
 			},
 			
 			handle: function(stanza) {
@@ -296,17 +290,16 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 					id = $stanza.attr('id');
 				this._sendAck(from, id);
 				
-				
 				if ($stanza.children('jingle').attr('action') === 'session-terminate') {
 					this.terminate(false);
 				} else {
-					this._peerConnection.processSignalingMessage(_jingleToSdp(stanza));	
+					this._onSignalingMessage(_jingleToSdp(stanza));	
 				}
 				return true;
 			},
 			
 			terminate: function(sendTerminateStanza) {
-				this._status = STATUS.CLOSED;
+				this._state = STATUS.CLOSED;
 				this._peerConnection.removeStream(this._remoteStream);
 				this._peerConnection.remoteStreams[0] = null;
 				this._peerConnection.close();
@@ -329,7 +322,7 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 
 					_connection.sendIQ(iq);
 				}
-			};
+			},
 			
 			/** PrivateFunction: _handleSdp
 			 * Handles all sdp messages received by the opened PeerConnection.
@@ -340,65 +333,74 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 			 * TODO:
 			 *   - Little refactoring to DRY it
 			 */
-			_handleSdp: function(msg) {				
+			_handleSdp: function(msg) {
+				console.log("handlesdp", msg, this._state);
 				var iq = $iq({'from': this._from, 'to': this._to, 'type': 'set'})
 					.c('jingle', {
 						'xmlns' : Strophe.NS.JINGLE,
 						'initiator' : this._initiator,
-						'responder' : this._responder,
-						'sid' : this._sid
-					}), // iq is now jingle
-					jsonSdp = _getJSONFromSdp(msg);
-
-				switch(this._status) {
-					case STATUS.INITIALIZING:
-						_assertCallStatus("OFFER", jsonSdp.messageType);
+						'responder' : this._responder/*,
+						'sid' : this._sid*/
+					}); // iq is now jingle
+				switch(this._state) {
+					case STATUS.PREPARING_OFFER:
+						//_assertCallStatus("OFFER", jsonSdp.messageType);
 						iq.attrs({'action' : 'session-initiate'});
 						_sdpToJingle(iq, msg);
 						
 						_connection.sendIQ(iq);
 						
-						this._status = STATUS.ANSWER;
+						this._state = STATUS.ANSWER;
 						break;
 					case STATUS.OFFER:
-						_assertCallStatus("ANSWER", jsonSdp.messageType);
+						//_assertCallStatus("ANSWER", jsonSdp.messageType);
 						
 						iq.attrs({'action' : 'session-info'});
 						
 						_sdpToJingle(iq, msg);
 						_connection.sendIQ(iq);
 						
-						this._status = STATUS.OK;
+						this._state = STATUS.OK;
 						break;
-					case STATUS.ANSWER:
-						_assertCallStatus("OK", jsonSdp.messageType);
+					case STATUS.PREPARING_ANSWER:
+						//_assertCallStatus("OK", jsonSdp.messageType);
 						iq.attrs({'action' : 'session-accept'});
 
-						_sdpToJingle(iq, msg, false);
+						_sdpToJingle(iq, msg);
 
 						_connection.sendIQ(iq);
 
-						_successCallback();
+						if (this._successCallback) {
+							this._successCallback();
+						}
 						
-						this._status = STATUS.OK;
+						this._state = STATUS.ESTABLISHED;
 						break;
-					case STATUS.OK:
+					case STATUS.ANSWER_RECEIVED:
+						iq.attrs({'action' : 'session-accept'});
+
+						_connection.sendIQ(iq);
+
+						if (this._successCallback) {
+							this._successCallback();
+						}
+					
+						this._state = STATUS.ESTABLISHED;
+						break;
+					case STATUS.ESTABLISHED:
 						break;
 					default:
 						throw "Invalid status";
 				}
 			},
 			
-			_sendAck: function(to, id) {
-				var $stanza = $(stanza)
-					iq = $iq({
-						'from': _connection.jid,
-						'to': to,
-						'id': id,
-						'type': 'result'
-					});
-				
-				_connection.sendIQ(iq);
+			_sendAck: function(to, id) {				
+				_connection.sendIQ($iq({
+					'from': _connection.jid,
+					'to': to,
+					'id': id,
+					'type': 'result'
+				}));
 			},
 			
 			/** PrivateFunction: _createPeerConnection
@@ -409,18 +411,44 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 			 */
 			_createPeerConnection: function(peerConnectionCallback) {
 				var self = this;
-				this._peerConnection = new PeerConnection(_serverConfig, peerConnectionCallback);
+				
+				this._actionNeeded = false;
+				this._iceStarted = false;
+				this._moreIceComing = true;
+				this._iceCandidateCount = 0;
+				this._state = STATUS.NEW;
+				this._markActionNeeded();
+				this._prevOffer = "";
+				this._receivedOffer = "";
+				this._candidates = [];
+				
+				this._peerConnection = new PeerConnection(_serverConfig, function(candidate, more) {
+					if (candidate) {
+						self._candidates.push(candidate);
+					}
+					if (more == false) {
+						self._moreIceComing = false;
+						if (self._state !== STATUS.ESTABLISHED) {
+							self._markActionNeeded();
+						}
+					}
+					self._iceCandidateCount++;
+				});
+				
 				this._peerConnection.addStream(_localStream);
 				
 				this._peerConnection.onaddstream = function(e) {
+					console.log(self._remoteView);
 					var stream = e.stream,
 						url = URL.createObjectURL(stream);
-					this._remoteView.attr('src', url);
-					this._remoteStream = stream;
+					self._remoteView.attr('src', url);
+					self._remoteStream = stream;
 				}
+				this._peerConnection.onsignalingmessage = this._onSignalingMessage.bind(this);
 				this._peerConnection.onremovestream = function(e) {
-					this._remoteView.attr('src', '');
-					this._remoteStream = null;
+					console.log("ONREMOVESTREAM");
+					self._remoteView.attr('src', '');
+					self._remoteStream = null;
 				}
 				this._peerConnection.onmessage = function(e) {
 					console.info("ONMESSAGE");
@@ -438,7 +466,104 @@ Strophe.addConnectionPlugin('jingle', (function(self) {
 					console.info("ONSTATECHANGE");
 					console.dir(e ,state);
 				}
+			},
+			
+			_onSignalingMessage: function(msg) {
+				console.log("signalingmsg", msg, "state: " + this._state);
+				console.log(this._peerConnection);
+				var sdp = new SessionDescription(msg);
+				if (this._state == STATUS.NEW) {
+					this._state = STATUS.OFFER_RECEIVED;
+					this._receivedOffer = msg;
+					this._peerConnection.setRemoteDescription(this._peerConnection.SDP_OFFER,
+						sdp);
+					this._markActionNeeded();
+				} else if (this._state = STATUS.OFFER_SENT) {
+					console.log("OFFERSENT -> ANSWER_RECEIVED");
+					this._state = STATUS.ANSWER_RECEIVED;
+					this._receivedOffer = msg;
+					this._peerConnection.setRemoteDescription(this._peerConnection.SDP_ANSWER, 
+						sdp);
+					this._markActionNeeded();
+				} else if (this._state === STATUS.ESTABLISHED) {
+					console.log('foobar');
+				}
+			},
+			
+			_onStableState: function() {
+				var sdp;
+				if (this._actionNeeded) {
+					if (this._state === STATUS.NEW || this._state === STATUS.ESTABLISHED) {
+						// TODO: Be able to configure this
+						var newOffer = this._peerConnection.createOffer({
+							has_audio: true,
+							has_video: true
+						});
+						if (newOffer.toSdp() != this._prevOffer && this._receivedOffer === "") {
+							this._peerConnection.setLocalDescription(this._peerConnection.SDP_OFFER,
+								newOffer);
+							this._peerConnection.startIce();
+							this._state = STATUS.PREPARING_OFFER;
+							this._markActionNeeded();
+							return;
+						}
+					} else if (this._state === STATUS.PREPARING_OFFER) {
+						if (this._moreIceComing) {
+							return;
+						}
+						this._prevOffer = this._peerConnection.localDescription.toSdp();
+						this._handleSdp(this._prevOffer);
+						this._state = STATUS.OFFER_SENT;
+					} else if (this._state === STATUS.OFFER_RECEIVED) {
+						console.log("OFFER_RECEIVED");
+						// TODO: Configurable
+						sdp = this._peerConnection.createAnswer(this._receivedOffer, {
+							has_audio: true,
+							has_video: true
+						});
+						this._peerConnection.setLocalDescription(this._peerConnection.SDP_ANSWER, 
+							sdp);
+						this._state = STATUS.PREPARING_ANSWER;
+						if (!this._iceStarted) {
+							this._peerConnection.startIce();
+							this._iceStarted = true;
+						} else {
+							this._markActionNeeded();
+							return;
+						}
+					} else if (this._state === STATUS.PREPARING_ANSWER) {
+						console.log("PREPARING_ANSWER");
+						if (this._moreIceComing) {
+							return;
+						}
+						sdp = this._peerConnection.localDescription.toSdp();
+						this._handleSdp(sdp);
+						this._state = STATUS.ESTABLISHED;
+					} else if (this._state === STATUS.ANSWER_RECEIVED) {
+						//this._handleSdp();
+					} else {
+						//throw "Invalid state " + this._state;
+					}
+					this._actionNeeded = false;
+				}
+			},
+			
+			_markActionNeeded: function() {
+				this._actionNeeded = true;
+				var self = this;
+				this._doLater(function() {
+					self._onStableState();
+				});
+			},
+			
+			_doLater: function(what) {
+				// Post an event to myself so that I get called a while later.
+				// (needs more JS/DOM info. Just call the processing function on a delay
+				// for now.)
+				window.setTimeout(what, 1);
 			}
 		}
 	}());
+	
+	return self;
 })({}));
