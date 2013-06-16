@@ -12,8 +12,8 @@
  *   - Michael Weibel <michael.weibel@gmail.com>
  */
 
-if (window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection) {
-	window.PeerConnection = window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection;
+if (window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection || window.webkitRTCPeerConnection) {
+	window.PeerConnection = window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection || window.webkitRTCPeerConnection;
 	window.URL = window.webkitURL;
 	navigator.getUserMedia = navigator.webkitGetUserMedia;
 } else if (window.mozRTCPeerConnection) {
