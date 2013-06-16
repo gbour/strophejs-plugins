@@ -16,6 +16,9 @@ if (window.webkitPeerConnection || window.webkitPeerConnection00 || window.webki
 	window.PeerConnection = window.webkitPeerConnection || window.webkitPeerConnection00 || window.webkitDeprecatedPeerConnection;
 	window.URL = window.webkitURL;
 	navigator.getUserMedia = navigator.webkitGetUserMedia;
+} else if (window.mozRTCPeerConnection) {
+	window.PeerConnection = window.mozRTCPeerConnection;
+	navigator.getUserMedia = navigator.mozGetUserMedia;
 }
 
 Strophe.addConnectionPlugin('jingle', (function(self) {
